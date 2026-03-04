@@ -1,4 +1,5 @@
 import os
+import json
 import numpy as np
 import librosa
 from sklearn.model_selection import train_test_split
@@ -12,7 +13,7 @@ from tensorflow.keras.utils import to_categorical
 print("=== MFCC TRAINING STARTED ===")
 
 # =============================
-# PATH (FIXED FOR YOUR PROJECT)
+# PATH
 # =============================
 DATA_PATH = "dataset"
 
@@ -21,7 +22,7 @@ DATA_PATH = "dataset"
 # =============================
 SAMPLE_RATE = 22050
 N_MFCC = 40
-MAX_LEN = 174   # fixed length for MFCC
+MAX_LEN = 174
 TEST_SIZE = 0.2
 EPOCHS = 60
 BATCH_SIZE = 32
@@ -41,6 +42,7 @@ for emotion in os.listdir(DATA_PATH):
     for file in os.listdir(emotion_path):
         if file.endswith(".wav"):
             file_path = os.path.join(emotion_path, file)
+
             try:
                 signal, sr = librosa.load(file_path, sr=SAMPLE_RATE)
 
@@ -50,10 +52,10 @@ for emotion in os.listdir(DATA_PATH):
                     n_mfcc=N_MFCC
                 )
 
-                # Pad or truncate
+                # Pad / Truncate
                 if mfcc.shape[1] < MAX_LEN:
                     pad_width = MAX_LEN - mfcc.shape[1]
-                    mfcc = np.pad(mfcc, pad_width=((0,0),(0,pad_width)))
+                    mfcc = np.pad(mfcc, ((0, 0), (0, pad_width)))
                 else:
                     mfcc = mfcc[:, :MAX_LEN]
 
@@ -64,7 +66,7 @@ for emotion in os.listdir(DATA_PATH):
                 print("Error:", e)
 
 X = np.array(X)
-X = X[..., np.newaxis]   # (samples, 40, 174, 1)
+X = X[..., np.newaxis]  # shape: (samples, 40, 174, 1)
 
 print("MFCC shape:", X.shape)
 
@@ -72,23 +74,28 @@ print("MFCC shape:", X.shape)
 # LABEL ENCODING
 # =============================
 le = LabelEncoder()
-y = le.fit_transform(y)
-y = to_categorical(y)
+y_encoded = le.fit_transform(y)
+y_categorical = to_categorical(y_encoded)
 
 # =============================
 # TRAIN / TEST SPLIT
 # =============================
 X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=TEST_SIZE, random_state=42, stratify=y
+    X,
+    y_categorical,
+    test_size=TEST_SIZE,
+    random_state=42,
+    stratify=y_encoded
 )
 
 print("Train samples:", X_train.shape[0])
 print("Test samples :", X_test.shape[0])
 
 # =============================
-# CNN MODEL (MFCC ONLY)
+# CNN MODEL
 # =============================
 model = Sequential([
+
     Conv2D(32, (3,3), activation='relu', input_shape=X.shape[1:]),
     BatchNormalization(),
     MaxPooling2D((2,2)),
@@ -105,9 +112,11 @@ model = Sequential([
     Dropout(0.4),
 
     Flatten(),
+
     Dense(256, activation='relu'),
     Dropout(0.4),
-    Dense(y.shape[1], activation='softmax')
+
+    Dense(y_categorical.shape[1], activation='softmax')
 ])
 
 model.compile(
@@ -121,9 +130,11 @@ model.summary()
 # =============================
 # TRAIN
 # =============================
-print("🚀 Training MFCC CNN model...")
+print("Training MFCC CNN model...")
+
 history = model.fit(
-    X_train, y_train,
+    X_train,
+    y_train,
     validation_data=(X_test, y_test),
     epochs=EPOCHS,
     batch_size=BATCH_SIZE
@@ -133,4 +144,27 @@ history = model.fit(
 # FINAL EVALUATION
 # =============================
 loss, acc = model.evaluate(X_test, y_test, verbose=0)
-print(f"\n✅ FINAL TEST ACCURACY: {acc * 100:.2f}%")
+print(f"\nFINAL TEST ACCURACY: {acc * 100:.2f}%")
+
+# =============================
+# SAVE EVERYTHING
+# =============================
+
+print("\nSaving model and data...")
+
+# Save model
+model.save("saved_model.h5")
+
+# Save test data
+np.save("X_test.npy", X_test)
+np.save("y_test.npy", y_test)
+
+# Save history
+with open("history.json", "w") as f:
+    json.dump(history.history, f)
+
+# Save label classes
+np.save("label_classes.npy", le.classes_)
+
+print("All files saved successfully!")
+print("=== TRAINING COMPLETE ===")
